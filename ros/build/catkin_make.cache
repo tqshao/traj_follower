@@ -1,2 +1,0 @@
-traj_follower
--DCATKIN_DEVEL_PREFIX=/home/tq/Documents/Git/traj_follower/ros/devel -DCMAKE_INSTALL_PREFIX=/home/tq/Documents/Git/traj_follower/ros/install -G Unix Makefiles
