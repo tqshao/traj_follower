@@ -1,0 +1,8 @@
+prefix=/home/tq/Documents/Git/traj_follower/ros/install
+
+Name: traj_follower
+Description: Description of traj_follower
+Version: 0.0.0
+Cflags: 
+Libs: -L/home/tq/Documents/Git/traj_follower/ros/install/lib -lros_chrono
+Requires: roscpp rospy std_msgs message_runtime ros_chrono_msgs
