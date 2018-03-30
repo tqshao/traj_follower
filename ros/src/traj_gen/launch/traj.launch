@@ -1,0 +1,6 @@
+<launch>
+
+<node name="Reference" pkg="traj_gen" type="traj_gen"/>
+<node name="chrono_path_follower" pkg="follower" type="path_follower" cwd="node" output="screen"/>
+
+</launch>

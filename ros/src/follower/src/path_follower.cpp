@@ -21,6 +21,9 @@
 
 #include "chrono_models/vehicle/hmmwv/HMMWV.h"
 
+#include "ros/ros.h"
+#include "std_msgs/String.h"
+
 using namespace chrono;
 using namespace chrono::geometry;
 using namespace chrono::vehicle;
@@ -28,7 +31,7 @@ using namespace chrono::vehicle::hmmwv;
 
 // =============================================================================
 // Data path
-std::string data_path("../../../src/traj_follower/data/vehicle/");
+std::string data_path("../../../src/follower/data/vehicle/");
 
 // Contact method type
 ChMaterialSurface::ContactMethod contact_method = ChMaterialSurface::SMC;
@@ -58,10 +61,11 @@ std::string speed_controller_file(data_path + "generic/driver/SpeedController.js
 // std::string path_file("paths/straight.txt");
 // std::string path_file("paths/curve.txt");
 // std::string path_file("paths/NATO_double_lane_change.txt");
-std::string path_file(data_path + "paths/ISO_double_lane_change.txt");
+std::string path_file(data_path + "paths/my_path.txt");
 
 // Initial vehicle location and orientation
-ChVector<> initLoc(-125, -125, 0.5);
+// ChVector<> initLoc(-125, -125, 0.5); default
+ChVector<> initLoc(0, 0, 0.5);
 ChQuaternion<> initRot(1, 0, 0, 0);
 
 // Desired vehicle speed (m/s)
@@ -166,20 +170,38 @@ class ChDriverSelector : public irr::IEventReceiver {
 
         return false;
     }
-
   private:
     bool m_using_gui;
     const ChVehicle& m_vehicle;
     ChPathFollowerDriver* m_driver_follower;
-    ChIrrGuiDriver* m_driver_gui;
     ChDriver* m_driver;
+    ChIrrGuiDriver* m_driver_gui;
 };
+
+void write_path(std::vector<double> &x_traj_curr, std::vector<double> &y_traj_curr,
+                std::string path_file){
+  double num_pts = x_traj_curr.size();
+  double num_cols = 3;
+  double z_val = 0.5;
+  std::ofstream myfile;
+  myfile.open(path_file,std::ofstream::out | std::ofstream::trunc);
+
+  myfile << ' ' << num_pts << ' '<< num_cols << '\n';
+
+  for (int pt_cnt=0; pt_cnt<num_pts;pt_cnt=pt_cnt+1){
+    myfile << ' ' << x_traj_curr[pt_cnt] << ' '<< y_traj_curr[pt_cnt] <<' ' << z_val << '\n';
+  }
+  myfile.close();
+}
 
 // =============================================================================
 
 int main(int argc, char* argv[]) {
     GetLog() << "Copyright (c) 2017 projectchrono.org\nChrono version: " << CHRONO_VERSION << "\n\n";
 
+    // create ros node
+    ros::init(argc, argv, "chrono_path_follower");
+    ros::NodeHandle n;
     // ------------------------------
     // Create the vehicle and terrain
     // ------------------------------
@@ -211,12 +233,6 @@ int main(int argc, char* argv[]) {
     terrain.SetTexture(data_path + "terrain/textures/tile4.jpg", 200, 200);
     terrain.Initialize(terrainHeight, terrainLength, terrainWidth);
 
-    // ----------------------
-    // Create the Bezier path
-    // ----------------------
-
-    auto path = ChBezierCurve::read(path_file);
-    ////path->write("my_path.txt");
     // ---------------------------------------
     // Create the vehicle Irrlicht application
     // ---------------------------------------
@@ -235,7 +251,6 @@ int main(int argc, char* argv[]) {
     app.SetChaseCamera(trackPoint, 6.0, 0.5);
 
     app.SetTimestep(step_size);
-    std::cout << "Error1?" << std::endl;
 
     // Visualization of controller points (sentinel & target)
     irr::scene::IMeshSceneNode* ballS = app.GetSceneManager()->addSphereSceneNode(0.1f);
@@ -257,17 +272,20 @@ int main(int argc, char* argv[]) {
     driver_follower.GetSteeringController().SetGains(0.5, 0, 0);
     driver_follower.GetSpeedController().SetGains(0.4, 0, 0);
     */
-    std::cout << "Error2?" << std::endl;
-    /*
-    FILE* file = fopen(speed_controller_file, "r");
-    if(file == 0) {
-    std::cout << "GetFileHeight failed to load the file." << std::endl;
-    }
-*/
+
+    // Initialize xy trajectory vectors
+    std::vector<double> x_traj_curr, y_traj_curr, x_traj_prev, y_traj_prev;
+    std::string planner_namespace("default");
+    n.getParam("vehicle/chrono/" + planner_namespace +"/traj/x", x_traj_curr);
+    n.getParam("vehicle/chrono/" + planner_namespace + "/traj/yVal", y_traj_curr);
+    x_traj_prev = x_traj_curr;
+    y_traj_prev = y_traj_curr;
+    write_path(x_traj_curr, y_traj_curr, path_file);
+    auto path = ChBezierCurve::read(path_file);
+
     ChPathFollowerDriver driver_follower(my_hmmwv.GetVehicle(), steering_controller_file,
-                                         speed_controller_file, path, "my_path", target_speed);
+                                         speed_controller_file, path, "my_path_", target_speed);
     driver_follower.Initialize();
-    std::cout << "Error3?" << std::endl;
 
     // Create and register a custom Irrlicht event receiver to allow selecting the
     // current driver model.
@@ -308,7 +326,6 @@ int main(int argc, char* argv[]) {
 
     utils::ChRunningAverage fwd_acc_driver_filter(filter_window_size);
     utils::ChRunningAverage lat_acc_driver_filter(filter_window_size);
-    std::cout << "Error3?" << std::endl;
 
     // ---------------
     // Simulation loop
@@ -329,6 +346,22 @@ int main(int argc, char* argv[]) {
     int render_frame = 0;
 
     while (app.GetDevice()->run()) {
+      // see if the trajectory changes
+        n.getParam("vehicle/chrono/" + planner_namespace +"/traj/x", x_traj_curr);
+        n.getParam("vehicle/chrono/" + planner_namespace + "/traj/yVal", y_traj_curr);
+        if(x_traj_curr != x_traj_prev || y_traj_curr != y_traj_prev){
+          write_path(x_traj_curr, y_traj_curr, path_file);
+          ChPathFollowerDriver driver_follower(my_hmmwv.GetVehicle(), steering_controller_file,
+                                               speed_controller_file, path, "my_path_", target_speed);
+          driver_follower.Initialize();
+          std::cout << " Reinitialize driver follower.." << std::endl;
+          ChDriverSelector selector(my_hmmwv.GetVehicle(), &driver_follower, &driver_gui);
+          app.SetUserEventReceiver(&selector);
+
+          x_traj_prev = x_traj_curr;
+          y_traj_prev = y_traj_curr;
+        }
+
         // Extract system state
         double time = my_hmmwv.GetSystem()->GetChTime();
         ChVector<> acc_CG = my_hmmwv.GetVehicle().GetChassisBody()->GetPos_dtdt();
