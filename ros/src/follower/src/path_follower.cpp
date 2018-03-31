@@ -119,63 +119,22 @@ class ChDriverSelector : public irr::IEventReceiver {
     ChDriver* GetDriver() { return m_driver; }
     bool UsingGUI() const { return m_using_gui; }
 
-    virtual bool OnEvent(const irr::SEvent& event) {
-        // Only interpret keyboard inputs.
-        if (event.EventType != irr::EET_KEY_INPUT_EVENT)
-            return false;
-
-        // Disregard key pressed
-        if (event.KeyInput.PressedDown)
-            return false;
-
-        switch (event.KeyInput.Key) {
-            case irr::KEY_COMMA:
-                if (m_using_gui) {
-                    m_driver = m_driver_follower;
-                    m_using_gui = false;
-                }
-                return true;
-            case irr::KEY_PERIOD:
-                if (!m_using_gui) {
-                    m_driver_gui->SetThrottle(m_driver_follower->GetThrottle());
-                    m_driver_gui->SetSteering(m_driver_follower->GetSteering());
-                    m_driver_gui->SetBraking(m_driver_follower->GetBraking());
-                    m_driver = m_driver_gui;
-                    m_using_gui = true;
-                }
-                return true;
-            case irr::KEY_HOME:
-                if (!m_using_gui && !m_driver_follower->GetSteeringController().IsDataCollectionEnabled()) {
-                    std::cout << "Data collection started at t = " << m_vehicle.GetChTime() << std::endl;
-                    m_driver_follower->GetSteeringController().StartDataCollection();
-                }
-                return true;
-            case irr::KEY_END:
-                if (!m_using_gui && m_driver_follower->GetSteeringController().IsDataCollectionEnabled()) {
-                    std::cout << "Data collection stopped at t = " << m_vehicle.GetChTime() << std::endl;
-                    m_driver_follower->GetSteeringController().StopDataCollection();
-                }
-                return true;
-            case irr::KEY_INSERT:
-                if (!m_using_gui && m_driver_follower->GetSteeringController().IsDataAvailable()) {
-                    char filename[100];
-                    sprintf(filename, "controller_%.2f.out", m_vehicle.GetChTime());
-                    std::cout << "Data written to file " << filename << std::endl;
-                    m_driver_follower->GetSteeringController().WriteOutputFile(std::string(filename));
-                }
-                return true;
-            default:
-                break;
-        }
-
-        return false;
+    void update_driver(ChPathFollowerDriver* driver_follower){
+      m_driver_follower = driver_follower;
+      m_driver = driver_follower;
     }
+
+    virtual bool OnEvent(const irr::SEvent& event) {
+      // Only interpret keyboard inputs.
+           return true;
+   }
+
   private:
     bool m_using_gui;
     const ChVehicle& m_vehicle;
+    ChIrrGuiDriver* m_driver_gui;
     ChPathFollowerDriver* m_driver_follower;
     ChDriver* m_driver;
-    ChIrrGuiDriver* m_driver_gui;
 };
 
 void write_path(std::vector<double> &x_traj_curr, std::vector<double> &y_traj_curr,
@@ -251,6 +210,7 @@ int main(int argc, char* argv[]) {
     app.SetChaseCamera(trackPoint, 6.0, 0.5);
 
     app.SetTimestep(step_size);
+    app.SetTryRealtime(true);
 
     // Visualization of controller points (sentinel & target)
     irr::scene::IMeshSceneNode* ballS = app.GetSceneManager()->addSphereSceneNode(0.1f);
@@ -258,6 +218,7 @@ int main(int argc, char* argv[]) {
     ballS->getMaterial(0).EmissiveColor = irr::video::SColor(0, 255, 0, 0);
     ballT->getMaterial(0).EmissiveColor = irr::video::SColor(0, 0, 255, 0);
 
+    // std::cout << "Position y:  " << pT.y() << " Position x: " << pT.x() <<  std::endl;
     // -------------------------
     // Create the driver systems
     // -------------------------
@@ -283,13 +244,13 @@ int main(int argc, char* argv[]) {
     write_path(x_traj_curr, y_traj_curr, path_file);
     auto path = ChBezierCurve::read(path_file);
 
-    ChPathFollowerDriver driver_follower(my_hmmwv.GetVehicle(), steering_controller_file,
-                                         speed_controller_file, path, "my_path_", target_speed);
-    driver_follower.Initialize();
+    ChPathFollowerDriver* driver_follower_p = new ChPathFollowerDriver(my_hmmwv.GetVehicle(), steering_controller_file,
+                                         speed_controller_file, path, "my_path", target_speed);
+    driver_follower_p->Initialize();
 
     // Create and register a custom Irrlicht event receiver to allow selecting the
     // current driver model.
-    ChDriverSelector selector(my_hmmwv.GetVehicle(), &driver_follower, &driver_gui);
+    ChDriverSelector selector(my_hmmwv.GetVehicle(), driver_follower_p, &driver_gui);
     app.SetUserEventReceiver(&selector);
 
     // Finalize construction of visualization assets
@@ -314,7 +275,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Error creating directory " << pov_dir << std::endl;
             return 1;
         }
-        driver_follower.ExportPathPovray(out_dir);
+        driver_follower_p->ExportPathPovray(out_dir);
     }
 
     utils::CSV_writer csv("\t");
@@ -349,36 +310,33 @@ int main(int argc, char* argv[]) {
       // see if the trajectory changes
         n.getParam("vehicle/chrono/" + planner_namespace +"/traj/x", x_traj_curr);
         n.getParam("vehicle/chrono/" + planner_namespace + "/traj/yVal", y_traj_curr);
-        if(x_traj_curr != x_traj_prev || y_traj_curr != y_traj_prev){
-          write_path(x_traj_curr, y_traj_curr, path_file);
-          ChPathFollowerDriver driver_follower(my_hmmwv.GetVehicle(), steering_controller_file,
-                                               speed_controller_file, path, "my_path_", target_speed);
-          driver_follower.Initialize();
-          std::cout << " Reinitialize driver follower.." << std::endl;
-          ChDriverSelector selector(my_hmmwv.GetVehicle(), &driver_follower, &driver_gui);
-          app.SetUserEventReceiver(&selector);
 
+        if(x_traj_curr != x_traj_prev || y_traj_curr != y_traj_prev){
+
+          write_path(x_traj_curr, y_traj_curr, path_file);
+          auto path = ChBezierCurve::read(path_file);
+                  delete driver_follower_p;
+          driver_follower_p = new ChPathFollowerDriver(my_hmmwv.GetVehicle(),
+                            steering_controller_file, speed_controller_file, path, "my_path", target_speed);
+          driver_follower_p->Initialize();
+          ChDriverSelector selector_new(my_hmmwv.GetVehicle(), driver_follower_p, &driver_gui);
+          // selector.update_driver(driver_follower_p);
+          app.SetUserEventReceiver(&selector_new);
+          app.AssetBindAll();
+          app.AssetUpdateAll();
+          app.GetDevice()->run();
           x_traj_prev = x_traj_curr;
           y_traj_prev = y_traj_curr;
         }
-
-        // Extract system state
         double time = my_hmmwv.GetSystem()->GetChTime();
-        ChVector<> acc_CG = my_hmmwv.GetVehicle().GetChassisBody()->GetPos_dtdt();
-        ChVector<> acc_driver = my_hmmwv.GetVehicle().GetVehicleAcceleration(driver_pos);
-        double fwd_acc_CG = fwd_acc_GC_filter.Add(acc_CG.x());
-        double lat_acc_CG = lat_acc_GC_filter.Add(acc_CG.y());
-        double fwd_acc_driver = fwd_acc_driver_filter.Add(acc_driver.x());
-        double lat_acc_driver = lat_acc_driver_filter.Add(acc_driver.y());
 
-        // End simulation
         if (time >= t_end)
             break;
 
         // Collect output data from modules (for inter-module communication)
-        double throttle_input = selector.GetDriver()->GetThrottle();
-        double steering_input = selector.GetDriver()->GetSteering();
-        double braking_input = selector.GetDriver()->GetBraking();
+        double throttle_input = driver_follower_p->GetThrottle();
+        double steering_input = driver_follower_p->GetSteering();
+        double braking_input = driver_follower_p->GetBraking();
 
         /*
         // Hack for acceleration-braking maneuver
@@ -396,10 +354,11 @@ int main(int argc, char* argv[]) {
 
         // Update sentinel and target location markers for the path-follower controller.
         // Note that we do this whether or not we are currently using the path-follower driver.
-        const ChVector<>& pS = driver_follower.GetSteeringController().GetSentinelLocation();
-        const ChVector<>& pT = driver_follower.GetSteeringController().GetTargetLocation();
+        const ChVector<>& pS = driver_follower_p->GetSteeringController().GetSentinelLocation();
+        const ChVector<>& pT = driver_follower_p->GetSteeringController().GetTargetLocation();
         ballS->setPosition(irr::core::vector3df((irr::f32)pS.x(), (irr::f32)pS.y(), (irr::f32)pS.z()));
         ballT->setPosition(irr::core::vector3df((irr::f32)pT.x(), (irr::f32)pT.y(), (irr::f32)pT.z()));
+        std::cout << "Position y:  " << pT.y() << " Position x: " << pT.x() <<  std::endl;
 
         // Render scene and output POV-Ray data
         if (sim_frame % render_steps == 0) {
@@ -407,33 +366,13 @@ int main(int argc, char* argv[]) {
             app.DrawAll();
             app.EndScene();
 
-            if (povray_output) {
-                char filename[100];
-                sprintf(filename, "%s/data_%03d.dat", pov_dir.c_str(), render_frame + 1);
-                utils::WriteShapesPovray(my_hmmwv.GetSystem(), filename);
-            }
-
-            if (state_output) {
-                csv << time << steering_input << throttle_input << braking_input;
-                csv << my_hmmwv.GetVehicle().GetVehicleSpeed();
-                csv << acc_CG.x() << fwd_acc_CG << acc_CG.y() << lat_acc_CG;
-                csv << acc_driver.x() << fwd_acc_driver << acc_driver.y() << lat_acc_driver;
-                csv << std::endl;
-            }
-
             render_frame++;
         }
 
-        // Debug logging
-        if (debug_output && sim_frame % debug_steps == 0) {
-            GetLog() << "driver acceleration:  " << acc_driver.x() << "  " << acc_driver.y() << "  " << acc_driver.z()
-                     << "\n";
-            GetLog() << "CG acceleration:      " << acc_CG.x() << "  " << acc_CG.y() << "  " << acc_CG.z() << "\n";
-            GetLog() << "\n";
-        }
+
 
         // Update modules (process inputs from other modules)
-        driver_follower.Synchronize(time);
+        driver_follower_p->Synchronize(time);
         driver_gui.Synchronize(time);
         terrain.Synchronize(time);
         my_hmmwv.Synchronize(time, steering_input, braking_input, throttle_input, terrain);
@@ -442,7 +381,7 @@ int main(int argc, char* argv[]) {
 
         // Advance simulation for one timestep for all modules
         double step = realtime_timer.SuggestSimulationStep(step_size);
-        driver_follower.Advance(step);
+        driver_follower_p->Advance(step);
         driver_gui.Advance(step);
         terrain.Advance(step);
         my_hmmwv.Advance(step);

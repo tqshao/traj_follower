@@ -123,59 +123,18 @@ class ChDriverSelector : public irr::IEventReceiver {
         // Only interpret keyboard inputs.
         if (event.EventType != irr::EET_KEY_INPUT_EVENT)
             return false;
-
         // Disregard key pressed
         if (event.KeyInput.PressedDown)
             return false;
-
-        switch (event.KeyInput.Key) {
-            case irr::KEY_COMMA:
-                if (m_using_gui) {
-                    m_driver = m_driver_follower;
-                    m_using_gui = false;
-                }
-                return true;
-            case irr::KEY_PERIOD:
-                if (!m_using_gui) {
-                    m_driver_gui->SetThrottle(m_driver_follower->GetThrottle());
-                    m_driver_gui->SetSteering(m_driver_follower->GetSteering());
-                    m_driver_gui->SetBraking(m_driver_follower->GetBraking());
-                    m_driver = m_driver_gui;
-                    m_using_gui = true;
-                }
-                return true;
-            case irr::KEY_HOME:
-                if (!m_using_gui && !m_driver_follower->GetSteeringController().IsDataCollectionEnabled()) {
-                    std::cout << "Data collection started at t = " << m_vehicle.GetChTime() << std::endl;
-                    m_driver_follower->GetSteeringController().StartDataCollection();
-                }
-                return true;
-            case irr::KEY_END:
-                if (!m_using_gui && m_driver_follower->GetSteeringController().IsDataCollectionEnabled()) {
-                    std::cout << "Data collection stopped at t = " << m_vehicle.GetChTime() << std::endl;
-                    m_driver_follower->GetSteeringController().StopDataCollection();
-                }
-                return true;
-            case irr::KEY_INSERT:
-                if (!m_using_gui && m_driver_follower->GetSteeringController().IsDataAvailable()) {
-                    char filename[100];
-                    sprintf(filename, "controller_%.2f.out", m_vehicle.GetChTime());
-                    std::cout << "Data written to file " << filename << std::endl;
-                    m_driver_follower->GetSteeringController().WriteOutputFile(std::string(filename));
-                }
-                return true;
-            default:
-                break;
-        }
-
         return false;
     }
   private:
     bool m_using_gui;
     const ChVehicle& m_vehicle;
     ChPathFollowerDriver* m_driver_follower;
-    ChDriver* m_driver;
     ChIrrGuiDriver* m_driver_gui;
+    ChDriver* m_driver;
+
 };
 
 void write_path(std::vector<double> &x_traj_curr, std::vector<double> &y_traj_curr,
@@ -349,6 +308,7 @@ int main(int argc, char* argv[]) {
       // see if the trajectory changes
         n.getParam("vehicle/chrono/" + planner_namespace +"/traj/x", x_traj_curr);
         n.getParam("vehicle/chrono/" + planner_namespace + "/traj/yVal", y_traj_curr);
+
         if(x_traj_curr != x_traj_prev || y_traj_curr != y_traj_prev){
           write_path(x_traj_curr, y_traj_curr, path_file);
           ChPathFollowerDriver driver_follower(my_hmmwv.GetVehicle(), steering_controller_file,
